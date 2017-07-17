@@ -1,0 +1,20 @@
+{% ckan_extends %}
+
+{% import 'macros/form.html' as form %}
+
+{% block package_metadata_fields_custom %}
+    {% block custom_fields %}
+      {% snippet 'snippets/custom_form_fields.html', extras=data.extras, errors=errors, limit=3 %}
+    {% endblock %}
+
+    {% block package_cpr_status %}
+      {{ form.input('verified', label=_('CPR-Status'), id='field-cprvalidation', placeholder=_('Status'), value=data.verified, error=errors.verified, classes=['control-medium']) }}
+    {% endblock %}
+
+    {% block package_update_trigger %}
+      {{ form.input('update_trigger', label=_('Update-Trigger'), id='field-update-trigger', placeholder=_(''), value=true, error=errors.verified, classes=['control-medium']) }}
+    {% endblock %}
+
+{% endblock %}
+
+

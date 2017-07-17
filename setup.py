@@ -81,8 +81,13 @@ setup(
     entry_points='''
         [ckan.plugins]
         cprvalidation=ckanext.cprvalidation.plugin:CprvalidationPlugin
-	[babel.extractors]
-	ckan = ckan.lib.extract:extract_ckan
+	    [ckan.test_plugins]
+	        [paste.paster_command]
+	        validation=ckanext.cprvalidation.validation:Validation
+
+	    [babel.extractors]
+	    ckan = ckan.lib.extract:extract_ckan
+
     ''',
 
     # If you are changing from the default layout of your extension, you may
