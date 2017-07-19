@@ -77,34 +77,34 @@ class CprvalidationPlugin(plugins.SingletonPlugin, toolkit.DefaultDatasetForm):
         toolkit.add_resource('fanstatic', 'cprvalidation')
 
         # IPackageController / IResourceController
-    def after_update(self, context, pkg_dict):
+    #def after_update(self, context, pkg_dict):
         # # #
         # Since packages and resources share the same interface, check which it is
         # # #
-        pass
-        if "size" in pkg_dict:
-            validate_resource(context,pkg_dict)
-            log.warn("The updated dict was a resource")
-        else:
-            if (str.lower(str(pkg_dict['update_trigger'])) == "true"):
-                validate_package(context,pkg_dict)
-                log.warn("The updated dict was a package")
+    #    pass
+    #    if "size" in pkg_dict:
+    #        validate_resource(context,pkg_dict)
+    #        log.warn("The updated dict was a resource")
+    #    else:
+    #        if (str.lower(str(pkg_dict['update_trigger'])) == "true"):
+    #            validate_package(context,pkg_dict)
+    #            log.warn("The updated dict was a package")
 
     # IPackageController / IResourceController
-    def after_create(self,context,pkg_dict):
-        # # #
-        # Since packages and resources share the same interface, check which it is
-        # # #
-        pass
-        log.warn("after_create trigger")
+    #def after_create(self,context,pkg_dict):
+    #    # # #
+    #    # Since packages and resources share the same interface, check which it is
+    #    # # #
+    #    pass
+    #    log.warn("after_create trigger")
 
-        if "size" in pkg_dict:
-            validate_resource(context,pkg_dict)
-            log.warn("The updated dict was a resource")
-        else:
-            if (str.lower(str(pkg_dict['update_trigger'])) == "true"): #Update came from the template
-                validate_package(context,pkg_dict)
-                log.warn("The updated dict was a package")
+    #    if "size" in pkg_dict:
+    #        validate_resource(context,pkg_dict)
+    #        log.warn("The updated dict was a resource")
+    #    else:
+    #        if (str.lower(str(pkg_dict['update_trigger'])) == "true"): #Update came from the template
+    #            validate_package(context,pkg_dict)
+    #            log.warn("The updated dict was a package")
 
 
     # IDatasetForm - expanded schema
