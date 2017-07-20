@@ -2,22 +2,29 @@
 import sys
 import re
 import os
-
+import pandas
 import logging
 import psycopg2
 import urllib2
 import datetime
+import layout_scanner
+import json
 from ckan.logic import get_action
 from ckan.lib.cli import CkanCommand
 from ckan.common import config
 from time import sleep
 from pprint import pprint
+from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
+from pdfminer.converter import TextConverter
+from pdfminer.layout import LAParams
+from pdfminer.pdfpage import PDFPage
+from cStringIO import StringIO
+
 
 log = logging.getLogger(__name__)
 
 class Validation(CkanCommand):
     '''Performs CPR Validation.
-
     Usage:
         validation initdb
             Creates the database, must have configured the config with the correct password
@@ -25,7 +32,6 @@ class Validation(CkanCommand):
         validation scan
             Scans ckan for new resources and changes and validates them, run this periodically
     '''
-
     summary = __doc__.split('\n')[0]
     usage = __doc__
 
@@ -92,12 +98,7 @@ class Validation(CkanCommand):
 
     def initdb(self):
         #For debugging purposes we delete the database everytime we init. This CLEANS the database
-        #create_user = '''
-        #    DROP OWNED BY cprvalidation;
-        #    DROP ROLE IF EXISTS cprvalidation;
-        #    CREATE ROLE cprvalidation WITH PASSWORD %s;
-        #    END;
-        #'''
+
 
         d_port = config.get('ckan.cprvalidation.postgres_port', None)
         d_pass = config.get('ckan.cprvalidation.cprvalidation_password', None)
@@ -109,7 +110,10 @@ class Validation(CkanCommand):
             print("Setup postgres_port in /etc/ckan/default/production.ini")
         if postgres_pass == None:
             print("Setup postgres_password in /etc/ckan/default/production.ini")
-
+        create_user = '''
+                    CREATE ROLE cprvalidation WITH PASSWORD %s
+                    ON CONFLICT DO NOTHING;
+                '''
         drop_db = '''DROP DATABASE IF EXISTS cprvalidation;'''
         create_db = '''
 
@@ -141,6 +145,7 @@ class Validation(CkanCommand):
               last_updated character varying,
               cpr_number character varying,
               excepted boolean,
+              error character varying,
               CONSTRAINT status_pkey PRIMARY KEY (resource_id)
             )
             WITH (
@@ -162,7 +167,7 @@ class Validation(CkanCommand):
             sys.exit()
 
         cur = conn.cursor()
-        #cur.execute(create_user,[d_password])
+        cur.execute(create_user,[d_pass])
         cur.execute(drop_db)
         cur.execute(create_db)
         print("Initialized Database")
@@ -210,6 +215,8 @@ class Validation(CkanCommand):
 # Helper Functions
 # # # #
 def processCSV(file_path,local):
+    error = None
+    file_string = None
     # We'll use the package_create function to create a new dataset.
     request = urllib2.Request(
         'http://www.my_ckan_site.com/api/action/package_create')
@@ -223,8 +230,7 @@ def processCSV(file_path,local):
     #TODO: This is probably not the best way to handle a CSV file..
     if(local):
         with open(file_path) as f:
-            string = f.read().replace(',', ' ')
-            return string
+            file_string = f.read().replace(',', ' ')
     else:
         try:
             # We'll use the package_create function to create a new dataset.
@@ -233,13 +239,10 @@ def processCSV(file_path,local):
             #TODO: Add API from config, good if you want a dedicated CKAN user to scan
             request.add_header("Authorization", "0114f011-606b-46d1-b96e-01a1ae287a2d")
             response = urllib2.urlopen(request)
-            string = response.read().replace(',',' ')
-            return string
+            file_string = response.read().replace(',',' ')
         except urllib2.HTTPError as e:
             if e.code == 404:
-                print("404 file was not found")
-                #Don't try again as the file was not found
-                return None
+                error = "404 file was not found"
             elif e.code == 500:
                 print("500 Internal Server Error.. reconnecting")
                 if(retrycount < 5):
@@ -251,19 +254,107 @@ def processCSV(file_path,local):
                             # TODO: Add API from config, good if you want a dedicated CKAN user to scan
                             request.add_header("Authorization", "0114f011-606b-46d1-b96e-01a1ae287a2d")
                             response = urllib2.urlopen(request)
-                            string = response.read().replace(',', ' ')
-                            return string
+                            file_string = response.read().replace(',', ' ')
                         except urllib2.HTTPError as e:
                             retrycount += 1
                             print("Retrying...")
                         sleep(5)
+                else: #We tried more than 5 times
+                    error = "500 Internal Server Error"
             elif e.code == 504:
-                print("Gateway Timed Out, is file too big?")
-                return None
+                error = "Gateway Timed Out, is file too big?"
             else:
-                print("error: " + str(e.code))
-                return None
+                error = "Error: " + str(e.code)
 
+    return [error,file_string]
+
+def processDOCX(file_path):
+    error = None
+    file_string = None
+    try:
+        doc = Document(file_path)
+        fullText = []
+        for para in doc.paragraphs:
+            fullText.append(para.text)
+        file_string = '\n'.join(fullText)
+    except Exception as e:
+        error = e.message
+
+    return [error,file_string]
+
+
+def processXLSX(file_path):
+    error = None
+    file_string = None
+    #Uses Pandas to convert contents to string
+    #Simple but it works
+    #Parses all sheets by default
+    try:
+        df = pandas.read_excel(file_path)
+        file_string = df.to_string()
+    except Exception as e:
+        error = e.message
+
+    return [error,file_string]
+
+
+def processPDF(file_path):
+    error = None
+    file_string = None
+    try:
+        rsrcmgr = PDFResourceManager()
+        retstr = StringIO()
+        codec = 'utf-8'
+        laparams = LAParams()
+        device = TextConverter(rsrcmgr, retstr, codec=codec, laparams=laparams)
+        fp = file(file_path, 'rb')
+        interpreter = PDFPageInterpreter(rsrcmgr, device)
+        password = ""
+        maxpages = 0
+        caching = True
+        pagenos=set()
+
+        for page in PDFPage.get_pages(fp, pagenos, maxpages=maxpages, password=password,caching=caching, check_extractable=True):
+            print(page)
+            interpreter.process_page(page)
+
+        file_string = retstr.getvalue()
+
+        print(file_string)
+
+        fp.close()
+        device.close()
+        retstr.close()
+    except Exception as e:
+        error = e.message
+
+
+    return [error,file_string]
+
+def processJSON(file_path):
+    error = None
+    file_string = None
+
+    try:
+        with open(file_path) as data_file:
+            data = json.load(data_file)
+            file_string = str(data)
+    except Exception as e:
+        error = e.message
+
+    return [error,file_string]
+
+def processODS(file_path):
+    error = None
+    file_string = None
+    '''Uses Pyexcel-ods to load the data as an OrderedDict, reads all sheets by default'''
+    try:
+        data = get_data(file_path)
+        file_string = ' '.join([k + str(v) for k, v in data.items()])
+    except Exception as e:
+        error = e.message
+
+    return [error,file_string]
 
 def validateResource(resource):
     '''       Overview of the tuple
@@ -280,7 +371,6 @@ def validateResource(resource):
                 )
         '''
     siteurl = config.get('ckan.site_url')
-    validformats = ["csv"]
     d_port = config.get('ckan.cprvalidation.postgres_port', None)
     d_pass = config.get('ckan.cprvalidation.cprvalidation_password', None)
 
@@ -298,7 +388,7 @@ def validateResource(resource):
     print("DEBUG INFO: ")
     print("Datastore: " +str(datastore))
     print("Filestore: " + str(filestore))
-    print("Format: " + str(format))
+
 
     # Get the filepath, locally or externally, it should not matter
     if filestore:
@@ -307,31 +397,45 @@ def validateResource(resource):
         local = True
     elif datastore:
         file_path = siteurl + "/datastore/dump/" + id + "?format=csv"
+        format = "csv" #Datastore will always be CSV, so this makes it easier
 
+    print("Format: " + str(format))
     print("File_path: " + str(file_path))
-
-    #Null checking:
-    if format not in validformats:
-        print("Format %s can't be processed" % format)
-        return None
 
     if file_path is None:
         print("Could not construct file_path")
         return None
 
-    #Converts the file to a string we can regex and check
-    if format == "csv":
-        file_string = processCSV(file_path,local)
+    format = str(format).lower()
 
-        #we got the file_string
-    if(file_string is None):
-        #TODO: Implement an error state
-        error = True
+    if format == "csv":
+        output = processCSV(file_path,local)
+    elif format == "docx":
+        output = processDOCX(file_path)
+    elif format == "ods":
+        output = processODS(file_path)
+    elif format == "xlsx":
+        output = processXLSX(file_path)
+    elif format == "pdf":
+        output = processPDF(file_path)
+    elif format == "geojson" or format == "json":
+        output = processJSON(file_path)
+    else:
+        print("Format %s can't be processed" % format)
+        return
+
+    error = output[0]
+    file_string = output[1]
+    insert_error = False
+
+    if(file_string is None or error != None):
+        insert_error = True
     else:
         iscpr = validcpr(file_string)
 
 
-    if(error):
+    if(insert_error):
+        print(error)
         try:
             conn = psycopg2.connect(database="cprvalidation", host="localhost", user="cprvalidation", password=d_pass,
                                     port=d_port)
@@ -341,18 +445,16 @@ def validateResource(resource):
         current_time = datetime.datetime.now()  # Timestamp
         insert = """
                     UPDATE cprvalidation.status
-                    SET status='error', last_checked= %s
+                    SET status='error', last_checked = %s,error = %s
                     WHERE resource_id= %s
                     returning *
                 ;"""
 
         cur = conn.cursor()
-        cur.execute(insert, [current_time, id])
+        cur.execute(insert, [current_time,error,id])
         conn.commit()
         conn.close()
-        return
-    if(file_string != None):
-
+    else:
         if(not iscpr[0]): #If we dont have a CPR in the resource
             try:
                 conn = psycopg2.connect(database="cprvalidation",host="localhost", user="cprvalidation",password=d_pass,port=d_port)
@@ -401,10 +503,10 @@ def scanDB():
         print(e)
         sys.exit()
 
-    # TODO: this query needs to pick all the formats
+    # TODO: PDF is really slow, so we need to fix that, removed for now
     select = """
                    SELECT * FROM cprvalidation.status
-                   WHERE format = 'CSV'
+                   WHERE format = ANY('{csv,xlsx,json,geojson,ods,docx}')
                    AND (last_updated::DATE >= last_checked::DATE OR last_checked IS NULL)
                    AND (url_type IS NOT NULL OR datastore_active = 'true');
        """
@@ -476,7 +578,7 @@ def updateSchema(resources):
         i = (dict["package_id"],
              dict["id"],
              "pending",
-             dict["format"],
+             str(dict["format"]).lower(),
              dict["url"],
              dict["url_type"],
              dict["datastore_active"],
