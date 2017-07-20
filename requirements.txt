@@ -1,0 +1,4 @@
+xlrd
+pandas
+python-docx
+pdfminer==20131113
