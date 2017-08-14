@@ -252,7 +252,7 @@ def processCSV(file_path, local):
     # Creating a dataset requires an authorization header.
     # Replace *** with your API key, from your user account on the CKAN site
     # that you're creating the dataset on.
-    request.add_header('Authorization', '***')
+    api = config.get('ckan.cprvalidation.api', None)
 
     retrycount = 0
     #TODO: This is probably not the best way to handle a CSV file..
@@ -263,8 +263,7 @@ def processCSV(file_path, local):
         try:
             request = urllib2.Request(file_path)
 
-            #TODO: Add API from config, good if you want a dedicated CKAN user to scan
-            request.add_header("Authorization", "0114f011-606b-46d1-b96e-01a1ae287a2d")
+            request.add_header("Authorization", api)
             response = urllib2.urlopen(request)
             file_string = response.read().replace(',',' ')
         except urllib2.HTTPError as e:
@@ -278,8 +277,7 @@ def processCSV(file_path, local):
                             # We'll use the package_create function to create a new dataset.
                             request = urllib2.Request(file_path)
 
-                            # TODO: Add API from config, good if you want a dedicated CKAN user to scan
-                            request.add_header("Authorization", "0114f011-606b-46d1-b96e-01a1ae287a2d")
+                            request.add_header("Authorization", api)
                             response = urllib2.urlopen(request)
                             file_string = response.read().replace(',', ' ')
                         except urllib2.HTTPError as e:
