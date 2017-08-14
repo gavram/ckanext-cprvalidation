@@ -102,7 +102,6 @@ class Validation(CkanCommand):
 
     def initdb(self):
         #For debugging purposes we delete the database everytime we init. This CLEANS the database
-
         d_port = config.get('ckan.cprvalidation.postgres_port', None)
         d_pass = config.get('ckan.cprvalidation.cprvalidation_password', None)
         postgres_pass = config.get('ckan.cprvalidation.postgres_password', None)
@@ -177,7 +176,7 @@ class Validation(CkanCommand):
 
         cur = conn.cursor()
         try:
-            cur.execute(create_user,[d_pass])
+            #cur.execute(create_user,[d_pass])
             cur.execute(drop_db)
             cur.execute(create_db)
             print("Initialized Database")
