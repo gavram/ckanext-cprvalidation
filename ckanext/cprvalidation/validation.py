@@ -20,6 +20,7 @@ from pdfminer.layout import LAParams
 from pdfminer.pdfpage import PDFPage
 from cStringIO import StringIO
 import ckan
+import subprocess
 import pylons
 
 
@@ -67,11 +68,11 @@ class Validation(CkanCommand):
         d_port = config.get('ckan.cprvalidation.postgres_port', None)
         d_pass = config.get('ckan.cprvalidation.cprvalidation_password', None)
 
-        add_exception = ''' UPDATE cprvalidation.status SET
-                    excepted = TRUE
-                    WHERE resource_id = %s
-                    returning *
+        add_exception = ''' UPDATE cprvalidation.status SET excepted = TRUE
+                            WHERE package_id = %s
+                            returning *
         ;'''
+
         if d_pass == None:
             print("Setup cprvalidation_password in /etc/ckan/default/production.ini")
             sys.exit(1)
@@ -95,7 +96,7 @@ class Validation(CkanCommand):
         if(count == 0):
             print("Could not find relation %s " % id)
         else:
-            print("Added exception for %s " % id)
+            print("Added exception for %d resources in dataset with package_id: %s " % (count,id))
 
         conn.commit()
         conn.close()
@@ -400,6 +401,7 @@ def validateResource(resource):
                 )
         '''
     siteurl = config.get('ckan.site_url')
+    email = config.get('ckan.cprvalidation.email', None)
     d_port = config.get('ckan.cprvalidation.postgres_port', None)
     d_pass = config.get('ckan.cprvalidation.cprvalidation_password', None)
 
@@ -503,13 +505,19 @@ def validateResource(resource):
             conn.commit()
             conn.close()
         else: #We have a CPR-number!
-            print("CPR WAS FOUND!!!")
+
+            print("Detected a CPR number, if an exception is made nothing will happen")
+
             try:
                 conn = psycopg2.connect(database="cprvalidation",host="localhost", user="cprvalidation",password=d_pass,port=d_port)
             except Exception as e:
                 print(e)
                 sys.exit()
             current_time = datetime.datetime.utcnow() #Timestamp
+            select = """
+                        SELECT * FROM cprvalidation.status
+                        WHERE package_id = %s AND excepted IS NOT NULL;
+                    """
             insert = """
                         UPDATE cprvalidation.status
                         SET status='invalid', last_checked= %s,cpr_number=%s
@@ -517,14 +525,19 @@ def validateResource(resource):
                         returning *
             ;"""
 
+
             cur = conn.cursor()
+            cur.execute(select,[resource[0]])
+            if(len(cur.fetchall()) > 0 ): #There was an exception made for this resource
+                print("Exception was made for package with id: %s ignoring." % resource[0])
+                return
+
             cur.execute(insert, [current_time,iscpr[1],id])
             conn.commit()
             conn.close()
 
             try:
-                print("TRYING TO MAKE DATA PRIVATE")
-
+                print("Making dataset private")
                 package_id = resource[0]
                 package = get_action('package_show')({},{'id': package_id})
             except Exception as e:
@@ -537,7 +550,18 @@ def validateResource(resource):
                 print("Made dataset with package id: " + package_id + " private as it contains CPR data. Either add an exception or remove it from the site")
                 print("When an exception has been made or data altered, kindly mark data as public again")
 
-                #TODO: Add some mail report thing here1
+                #TODO: Add some mail report thing here
+                recipient = config.get('ckan.cprvalidation.email', None)
+                subject = "CPR fundet i datasæt: %s" % resource[0]
+                body = "CPR data er fundet i datasættet med id: %s specifikt resourcen med id: %s \n Data er gjort privat, tjek data igennem og " \
+                       "publicer igen eller tilføj en exception hvis du mener data ikke indeholder CPR og kan stå" \
+                       " inde for dette." % (resource[0],id)
+                try:
+                    process = subprocess.Popen(['mail', '-s', subject,'-r',"teknik@opendata.dk", recipient],
+                                                   stdin=subprocess.PIPE)
+                except Exception, error:
+                    print error
+                process.communicate(body)
 
             except Exception as e:
                 print("Could not update package")
@@ -563,7 +587,8 @@ def scanDB():
                    SELECT * FROM cprvalidation.status
                    WHERE format = ANY('{csv,xlsx,json,geojson,ods,docx}')
                    AND (last_updated::timestamp >= last_checked::timestamp OR last_checked IS NULL)
-                   AND (url_type IS NOT NULL OR datastore_active = 'true');
+                   AND (url_type IS NOT NULL OR datastore_active = 'true')
+                   AND excepted != TRUE;
        """
     print("Scanning for updates...")
     cur = conn.cursor()
@@ -670,7 +695,7 @@ def getAllResources():
     #We don't check private resources.
     #If you want to change this, the logic should be changed, as metadata_modified will update when we find a CPR number
     #resulting in an infinite scan
-    response = get_action('package_search')({}, {'rows': 1000000, 'include_private':False})
+    response = get_action('package_search')({}, {'rows': 1000000, 'include_private':True})
     local_data = response['results']
 
     resources = []
