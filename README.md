@@ -1,5 +1,6 @@
 # ckanext-cprvalidation
-Validates resources for the Danish national 
+Validates resources for the Danish national open data platform
+http://portal.opendata.dk
 
 Installing
 NB! This module is developed on CKAN v2.6., compatibility with other version is not ensured
