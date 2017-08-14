@@ -588,7 +588,7 @@ def scanDB():
                    WHERE format = ANY('{csv,xlsx,json,geojson,ods,docx}')
                    AND (last_updated::timestamp >= last_checked::timestamp OR last_checked IS NULL)
                    AND (url_type IS NOT NULL OR datastore_active = 'true')
-                   AND excepted IS NOT NULL;
+                   AND excepted IS NULL;
        """
     print("Scanning for updates...")
     cur = conn.cursor()
