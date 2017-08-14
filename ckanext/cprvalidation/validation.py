@@ -19,6 +19,8 @@ from pdfminer.converter import TextConverter
 from pdfminer.layout import LAParams
 from pdfminer.pdfpage import PDFPage
 from cStringIO import StringIO
+import ckan
+import pylons
 
 
 log = logging.getLogger(__name__)
@@ -62,7 +64,6 @@ class Validation(CkanCommand):
     def addexception(self, id):
         # Adds an exception to the database.
         # Sometimes resources will contain valid CPR-numbers which are in fact not
-
         d_port = config.get('ckan.cprvalidation.postgres_port', None)
         d_pass = config.get('ckan.cprvalidation.cprvalidation_password', None)
 
@@ -73,8 +74,10 @@ class Validation(CkanCommand):
         ;'''
         if d_pass == None:
             print("Setup cprvalidation_password in /etc/ckan/default/production.ini")
+            sys.exit(1)
         if d_port == None:
             print("Setup postgres_port in /etc/ckan/default/production.ini")
+            sys.exit(1)
 
         try:
             conn = psycopg2.connect(database="cprvalidation", host="localhost", user="cprvalidation", password=d_pass,
@@ -93,30 +96,36 @@ class Validation(CkanCommand):
             print("Could not find relation %s " % id)
         else:
             print("Added exception for %s " % id)
+
         conn.commit()
         conn.close()
 
     def initdb(self):
         #For debugging purposes we delete the database everytime we init. This CLEANS the database
 
-
         d_port = config.get('ckan.cprvalidation.postgres_port', None)
         d_pass = config.get('ckan.cprvalidation.cprvalidation_password', None)
         postgres_pass = config.get('ckan.cprvalidation.postgres_password', None)
-
+        error_state = False
         if d_pass == None:
             print("Setup cprvalidation_password in /etc/ckan/default/production.ini")
+            error_state = True
         if d_port == None:
             print("Setup postgres_port in /etc/ckan/default/production.ini")
+            error_state = True
         if postgres_pass == None:
             print("Setup postgres_password in /etc/ckan/default/production.ini")
+            error_state = True
+
+        if(error_state):
+            print("Exiting..")
+            sys.exit(1)
+
         create_user = '''
-                    CREATE ROLE cprvalidation WITH PASSWORD %s
-                    ON CONFLICT DO NOTHING;
+                    CREATE ROLE cprvalidation WITH PASSWORD %s;
                 '''
         drop_db = '''DROP DATABASE IF EXISTS cprvalidation;'''
         create_db = '''
-
             CREATE DATABASE cprvalidation
             WITH OWNER = cprvalidation
             ENCODING = 'UTF8'
@@ -141,8 +150,8 @@ class Validation(CkanCommand):
               url character varying,
               url_type character varying,
               datastore_active character varying,
-              last_checked character varying,
-              last_updated character varying,
+              last_checked timestamp,
+              last_updated timestamp,
               cpr_number character varying,
               excepted boolean,
               error character varying,
@@ -167,12 +176,22 @@ class Validation(CkanCommand):
             sys.exit()
 
         cur = conn.cursor()
-        cur.execute(create_user,[d_pass])
-        cur.execute(drop_db)
-        cur.execute(create_db)
-        print("Initialized Database")
-        conn.commit()
-        conn.close()
+        try:
+            #cur.execute(create_user,[d_pass])
+            cur.execute(drop_db)
+            cur.execute(create_db)
+            print("Initialized Database")
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            #TODO: Handle this sort of erros more gracefully
+            print("Unexpected error")
+            print(e.message)
+            sys.exit(1)
+
+        #
+        # We need two different sessions to the database as we are changing user
+        #
         try:
             conn = psycopg2.connect(database="cprvalidation", host="localhost", user="cprvalidation",
                                         password=d_pass,
@@ -186,18 +205,27 @@ class Validation(CkanCommand):
             sys.exit()
 
         cur = conn.cursor()
-        cur.execute(create_schema)
-        cur.execute(create_table)
-        print("Created schema and table")
-        conn.commit()
-        conn.close()
-        print("Done.")
+        try:
+            cur.execute(create_schema)
+            cur.execute(create_table)
+            print("Created schema and table")
+            conn.commit()
+            conn.close()
+            print("Done.")
+        except:
+            # TODO: Handle this sort of erros more gracefully
+            print("Unexpected error")
+            sys.exit(1)
+
 
     def scan(self):
         resource_list = getAllResources()  # list of all resources in CKAN
         print("%d resources in catalog \n" % len(resource_list))
+
         # Update the database with new resources and / or packages
         updateSchema(resource_list)
+
+        # Fetch the resources that needs to be scanned
         resources_to_check = scanDB()
         count = 0
 
@@ -214,7 +242,7 @@ class Validation(CkanCommand):
 # # # #
 # Helper Functions
 # # # #
-def processCSV(file_path,local):
+def processCSV(file_path, local):
     error = None
     file_string = None
     # We'll use the package_create function to create a new dataset.
@@ -233,7 +261,6 @@ def processCSV(file_path,local):
             file_string = f.read().replace(',', ' ')
     else:
         try:
-            # We'll use the package_create function to create a new dataset.
             request = urllib2.Request(file_path)
 
             #TODO: Add API from config, good if you want a dedicated CKAN user to scan
@@ -282,7 +309,6 @@ def processDOCX(file_path):
 
     return [error,file_string]
 
-
 def processXLSX(file_path):
     error = None
     file_string = None
@@ -297,8 +323,10 @@ def processXLSX(file_path):
 
     return [error,file_string]
 
-
 def processPDF(file_path):
+    #TODO: This method is generally too slow to be useful. Needs a rewrite (Add PDF as an allowed format in the SQL
+    #TODO: query when done)
+
     error = None
     file_string = None
     try:
@@ -334,7 +362,6 @@ def processPDF(file_path):
 def processJSON(file_path):
     error = None
     file_string = None
-
     try:
         with open(file_path) as data_file:
             data = json.load(data_file)
@@ -368,6 +395,9 @@ def validateResource(resource):
                  6 datastore_active character varying,
                  7 last_checked character varying,
                  8 last_updated character varying,
+                 9 cpr_number character varying,
+                 10 excepted bool,
+                 11 error character varying
                 )
         '''
     siteurl = config.get('ckan.site_url')
@@ -442,7 +472,7 @@ def validateResource(resource):
         except Exception as e:
             print(e)
             sys.exit()
-        current_time = datetime.datetime.now()  # Timestamp
+        current_time = datetime.datetime.utcnow()  # Timestamp is UTC as CKAN stores metadata_modified as UTC
         insert = """
                     UPDATE cprvalidation.status
                     SET status='error', last_checked = %s,error = %s
@@ -461,7 +491,7 @@ def validateResource(resource):
             except Exception as e:
                 print(e)
                 sys.exit()
-            current_time = datetime.datetime.now() #Timestamp
+            current_time = datetime.datetime.utcnow() #Timestamp
             insert = """
                         UPDATE cprvalidation.status
                         SET status='valid', last_checked= %s
@@ -474,12 +504,13 @@ def validateResource(resource):
             conn.commit()
             conn.close()
         else: #We have a CPR-number!
+            print("CPR WAS FOUND!!!")
             try:
                 conn = psycopg2.connect(database="cprvalidation",host="localhost", user="cprvalidation",password=d_pass,port=d_port)
             except Exception as e:
                 print(e)
                 sys.exit()
-            current_time = datetime.datetime.now() #Timestamp
+            current_time = datetime.datetime.utcnow() #Timestamp
             insert = """
                         UPDATE cprvalidation.status
                         SET status='invalid', last_checked= %s,cpr_number=%s
@@ -491,6 +522,31 @@ def validateResource(resource):
             cur.execute(insert, [current_time,iscpr[1],id])
             conn.commit()
             conn.close()
+
+            try:
+                print("TRYING TO MAKE DATA PRIVATE")
+
+                package_id = resource[0]
+                package = get_action('package_show')({},{'id': package_id})
+            except Exception as e:
+                print("Could not show package")
+                print(e.message)
+                sys.exit(1)
+            try:
+                package["private"] = True
+                get_action('package_update')({},package)
+                print("Made dataset with package id: " + package_id + " private as it contains CPR data. Either add an exception or remove it from the site")
+                print("When an exception has been made or data altered, kindly mark data as public again")
+
+                #TODO: Add some mail report thing here1
+
+            except Exception as e:
+                print("Could not update package")
+                print(e.message)
+                sys.exit(1)
+
+
+
 
 def scanDB():
     d_port = config.get('ckan.cprvalidation.postgres_port', None)
@@ -507,7 +563,7 @@ def scanDB():
     select = """
                    SELECT * FROM cprvalidation.status
                    WHERE format = ANY('{csv,xlsx,json,geojson,ods,docx}')
-                   AND (last_updated::DATE >= last_checked::DATE OR last_checked IS NULL)
+                   AND (last_updated::timestamp >= last_checked::timestamp OR last_checked IS NULL)
                    AND (url_type IS NOT NULL OR datastore_active = 'true');
        """
     print("Scanning for updates...")
@@ -541,8 +597,10 @@ def updateSchema(resources):
     database_resources = cur.fetchall()
     # These are new resources
     difference_insert = list(set([str(r['id']) for r in resources]) - set(r[0] for r in database_resources))
-    difference_update = list(set([str(r['metadata_modified']) for r in resources]) - set(r[1] for r in database_resources))
+    difference_update = list(set([(str(r['metadata_modified']).replace("T"," ")) for r in resources]) - set(str(r[1]) for r in database_resources))
 
+    print(len(resources))
+    print(len(database_resources))
     insert = """
                 INSERT INTO cprvalidation.status values %s
                 ON CONFLICT (resource_id) DO
@@ -551,7 +609,7 @@ def updateSchema(resources):
             ;"""
     update = """
                     UPDATE cprvalidation.status SET last_updated = %s
-                    WHERE resource_id = %s AND excepted != TRUE
+                    WHERE resource_id = %s
                     returning *
                 ;"""
 
@@ -594,14 +652,22 @@ def updateSchema(resources):
     # # #
     count = 0
     for date in difference_update:
-        count += 1
-        dict = find(resources, "metadata_modified", date)
-        i = date
-        cur.execute(update, (i, dict["id"]))
-    print("Updated %d new resources to the database \n" % count)
 
-    conn.commit()
-    conn.close()
+        #Multiple resources can share the same metadata_modified, so check them all
+        dicts = findall(resources, "metadata_modified", date.replace(" ", "T"))
+        for dict in dicts:
+            count += 1
+            i = dict["metadata_modified"]
+            try:
+                cur.execute(update, (i, dict["id"]))
+            except Exception as e:
+                print(e.message)
+    print("Updated %d new resources to the database \n" % count)
+    try:
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(e.message)
 
 
 def getAllResources():
@@ -609,10 +675,14 @@ def getAllResources():
     local_data = response['results']
 
     resources = []
+    dates = []
     for package in local_data:
         for resource in package["resources"]:
             resource["metadata_modified"] = package["metadata_modified"]
+            dates.append(package["metadata_modified"])
             resources.append(resource)
+
+    print(sorted(dates,reverse=True)[0])
 
     return resources
 
@@ -622,6 +692,17 @@ def find(lst, key, value):
         if dic[key] == value:
             return dic
     return None
+
+# Simple function that finds all values in a list of dicts
+def findall(lst,key,value):
+    found = []
+    for i, dic in enumerate(lst):
+        if dic[key] == value:
+            found.append(dic)
+    if(len(found) != 0):
+        return found
+    else:
+        return []
 
 
 def validcpr(file_string):

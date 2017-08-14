@@ -5,6 +5,7 @@ from ckan.plugins.toolkit import Invalid
 from logging import getLogger
 from ckan.logic import get_action
 
+
 log = getLogger(__name__)
 
 def verified_validator(value,context):
