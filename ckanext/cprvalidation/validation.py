@@ -177,7 +177,7 @@ class Validation(CkanCommand):
 
         cur = conn.cursor()
         try:
-            #cur.execute(create_user,[d_pass])
+            cur.execute(create_user,[d_pass])
             cur.execute(drop_db)
             cur.execute(create_db)
             print("Initialized Database")
@@ -599,8 +599,6 @@ def updateSchema(resources):
     difference_insert = list(set([str(r['id']) for r in resources]) - set(r[0] for r in database_resources))
     difference_update = list(set([(str(r['metadata_modified']).replace("T"," ")) for r in resources]) - set(str(r[1]) for r in database_resources))
 
-    print(len(resources))
-    print(len(database_resources))
     insert = """
                 INSERT INTO cprvalidation.status values %s
                 ON CONFLICT (resource_id) DO
@@ -652,7 +650,6 @@ def updateSchema(resources):
     # # #
     count = 0
     for date in difference_update:
-
         #Multiple resources can share the same metadata_modified, so check them all
         dicts = findall(resources, "metadata_modified", date.replace(" ", "T"))
         for dict in dicts:
@@ -671,7 +668,10 @@ def updateSchema(resources):
 
 
 def getAllResources():
-    response = get_action('package_search')({}, {'rows': 1000000, 'include_private':True})
+    #We don't check private resources.
+    #If you want to change this, the logic should be changed, as metadata_modified will update when we find a CPR number
+    #resulting in an infinite scan
+    response = get_action('package_search')({}, {'rows': 1000000, 'include_private':False})
     local_data = response['results']
 
     resources = []

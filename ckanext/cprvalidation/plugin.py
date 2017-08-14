@@ -40,73 +40,18 @@ def validate_package(context,pkg_dict):
         log.exception(e)
         log.warn("Something went wrong with the Validation update")
 
-def validate_resource(context,pkg_dict):
-    pass
-
-# Has to have the context of a sysadmin or we can't get private dataset
-#def get_queue():
-#    #This only works for ckan 2.5, if ckan 2.6 use include_private dataset
-#    context = {
-#        'ignore_capacity_check': True #includes private datasets
-#    }
-#
-#   try:
-#        datasets = get_action('package_search')(context, {'q':'','rows': 10000})
-#    except Exception as e:
-#        log.exception(e)
-#
-#    for dict in datasets["results"]:
-#        try:
-#            if dict["verified"] == "pending" or dict["verified"] == "ppending":
-#                log.warn("This dataset needs to be checked: " + str(dict["name"]))
-#        except KeyError:
-#            pass #The dataset might not have the verified field for some reason
-
 
 class CprvalidationPlugin(plugins.SingletonPlugin, toolkit.DefaultDatasetForm):
     plugins.implements(plugins.IConfigurer)
     plugins.implements(plugins.ITemplateHelpers)
     plugins.implements(plugins.IDatasetForm)
     plugins.implements(plugins.IRoutes, inherit=True)
-    plugins.implements(plugins.IPackageController, inherit=True)
-    plugins.implements(plugins.IResourceController,inherit=True)
 
     # IConfigurer
     def update_config(self, config_):
         toolkit.add_template_directory(config_, 'templates')
         toolkit.add_public_directory(config_, 'public')
         toolkit.add_resource('fanstatic', 'cprvalidation')
-
-        # IPackageController / IResourceController
-    #def after_update(self, context, pkg_dict):
-        # # #
-        # Since packages and resources share the same interface, check which it is
-        # # #
-    #    pass
-    #    if "size" in pkg_dict:
-    #        validate_resource(context,pkg_dict)
-    #        log.warn("The updated dict was a resource")
-    #    else:
-    #        if (str.lower(str(pkg_dict['update_trigger'])) == "true"):
-    #            validate_package(context,pkg_dict)
-    #            log.warn("The updated dict was a package")
-
-    # IPackageController / IResourceController
-    #def after_create(self,context,pkg_dict):
-    #    # # #
-    #    # Since packages and resources share the same interface, check which it is
-    #    # # #
-    #    pass
-    #    log.warn("after_create trigger")
-
-    #    if "size" in pkg_dict:
-    #        validate_resource(context,pkg_dict)
-    #        log.warn("The updated dict was a resource")
-    #    else:
-    #        if (str.lower(str(pkg_dict['update_trigger'])) == "true"): #Update came from the template
-    #            validate_package(context,pkg_dict)
-    #            log.warn("The updated dict was a package")
-
 
     # IDatasetForm - expanded schema
     def create_package_schema(self):
@@ -115,8 +60,6 @@ class CprvalidationPlugin(plugins.SingletonPlugin, toolkit.DefaultDatasetForm):
 
         schema.update({
             'verified': [toolkit.get_validator('ignore_missing'),
-                         toolkit.get_converter('convert_to_extras')],
-            'update_trigger': [toolkit.get_validator('ignore_missing'),
                          toolkit.get_converter('convert_to_extras')],
         })
         return schema
@@ -128,8 +71,6 @@ class CprvalidationPlugin(plugins.SingletonPlugin, toolkit.DefaultDatasetForm):
         schema.update({
             'verified': [toolkit.get_validator('ignore_missing'),
                          toolkit.get_converter('convert_to_extras')],
-            'update_trigger': [toolkit.get_validator('ignore_missing'),
-                         toolkit.get_converter('convert_to_extras')],
         })
         return schema
 
@@ -139,8 +80,6 @@ class CprvalidationPlugin(plugins.SingletonPlugin, toolkit.DefaultDatasetForm):
 
         schema.update({
             'verified': [toolkit.get_converter('convert_from_extras'),
-                         toolkit.get_validator('ignore_missing')],
-            'update_trigger': [toolkit.get_converter('convert_from_extras'),
                          toolkit.get_validator('ignore_missing')],
         })
         return schema
@@ -154,7 +93,7 @@ class CprvalidationPlugin(plugins.SingletonPlugin, toolkit.DefaultDatasetForm):
     def get_helpers(self):
         return []
 
-    '''IRoutes'''
+    '''IRoutes Adds download button to the admin page'''
     def before_map(self,map):
         cpr_ctrl = 'ckanext.cprvalidation.cpr:CprExportController'
         map.connect('download cpr report','/download/cprreport',controller=cpr_ctrl,action='download')
