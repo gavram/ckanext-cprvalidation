@@ -1,4 +1,4 @@
 xlrd
-pandas
+pandas==0.20.3
 python-docx
 pdfminer==20131113
