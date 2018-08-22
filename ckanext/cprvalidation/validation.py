@@ -418,10 +418,11 @@ def validateResource(resource):
     print("Datastore: " +str(datastore))
     print("Filestore: " + str(filestore))
 
+    storage_path = config.get('ckan.storage_path')
 
     # Get the filepath, locally or externally, it should not matter
     if filestore:
-        file_path = os.path.join("/var/lib/ckan/default/resources/",
+        file_path = os.path.join(storage_path, 'resources',
                                  id[0:3], id[3:6], id[6:])
         local = True
     elif datastore:
