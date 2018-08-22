@@ -34,6 +34,9 @@ class Validation(CkanCommand):
 
         validation scan
             Scans ckan for new resources and changes and validates them, run this periodically
+
+	validation addexception "package_id"
+	    Adds an exception in the database for false positives for alle resources on the given package
     '''
     summary = __doc__.split('\n')[0]
     usage = __doc__
@@ -415,7 +418,8 @@ def validateResource(resource):
     error = False
 
     print("DEBUG INFO: ")
-    print("Datastore: " +str(datastore))
+    print("Resource: " + str(resource))
+    print("Datastore: " + str(datastore))
     print("Filestore: " + str(filestore))
 
 
@@ -543,12 +547,13 @@ def validateResource(resource):
                 print(e.message)
                 sys.exit(1)
             try:
+		if(package["private"] == True): #If the dataset is already private, we do not need to send an email otherwise we spam
+		    return 
                 package["private"] = True
                 get_action('package_update')({},package)
                 print("Made dataset with package id: " + package_id + " private as it contains CPR data. Either add an exception or remove it from the site")
                 print("When an exception has been made or data altered, kindly mark data as public again")
 
-                #TODO: Add some mail report thing here
                 recipient = config.get('ckan.cprvalidation.email', None)
                 subject = "CPR fundet i datasæt: %s" % resource[0]
                 body = "CPR data er fundet i datasættet med id: %s specifikt resourcen med id: %s \n Data er gjort privat, tjek data igennem og " \
