@@ -10,7 +10,7 @@ import datetime
 import layout_scanner
 import json
 from ckan.logic import get_action
-from ckan.lib.cli import CkanCommand
+from ckan.lib.cli import CkanCommand, parse_db_config
 from ckan.common import config
 from time import sleep
 from pprint import pprint
@@ -84,7 +84,9 @@ class Validation(CkanCommand):
             sys.exit(1)
 
         try:
-            conn = psycopg2.connect(database="cprvalidation", host="localhost", user="cprvalidation", password=d_pass,
+            db_config = parse_db_config()
+            host = db_config.get('db_host')
+            conn = psycopg2.connect(database="cprvalidation", host=host, user="cprvalidation", password=d_pass,
                                     port=d_port)
             conn.autocommit = True
             print(" ")
@@ -170,7 +172,9 @@ class Validation(CkanCommand):
         '''
 
         try:
-            conn = psycopg2.connect(database="postgres", host="localhost", user="postgres", password=postgres_pass,
+            db_config = parse_db_config()
+            host = db_config.get('db_host')
+            conn = psycopg2.connect(database="postgres", host=host, user="postgres", password=postgres_pass,
                                     port=d_port)
             conn.autocommit = True
             print("Connected as postgres user.")
@@ -196,7 +200,9 @@ class Validation(CkanCommand):
         # We need two different sessions to the database as we are changing user
         #
         try:
-            conn = psycopg2.connect(database="cprvalidation", host="localhost", user="cprvalidation",
+            db_config = parse_db_config()
+            host = db_config.get('db_host')
+            conn = psycopg2.connect(database="cprvalidation", host=host, user="cprvalidation",
                                         password=d_pass,
                                         port=d_port)
             conn.autocommit = True
@@ -471,7 +477,9 @@ def validateResource(resource):
     if(insert_error):
         print(error)
         try:
-            conn = psycopg2.connect(database="cprvalidation", host="localhost", user="cprvalidation", password=d_pass,
+            db_config = parse_db_config()
+            host = db_config.get('db_host')
+            conn = psycopg2.connect(database="cprvalidation", host=host, user="cprvalidation", password=d_pass,
                                     port=d_port)
         except Exception as e:
             print(e)
@@ -491,7 +499,9 @@ def validateResource(resource):
     else:
         if(not iscpr[0]): #If we dont have a CPR in the resource
             try:
-                conn = psycopg2.connect(database="cprvalidation",host="localhost", user="cprvalidation",password=d_pass,port=d_port)
+                db_config = parse_db_config()
+                host = db_config.get('db_host')
+                conn = psycopg2.connect(database="cprvalidation",host=host, user="cprvalidation",password=d_pass,port=d_port)
             except Exception as e:
                 print(e)
                 sys.exit()
@@ -512,7 +522,9 @@ def validateResource(resource):
             print("Detected a CPR number, if an exception is made nothing will happen")
 
             try:
-                conn = psycopg2.connect(database="cprvalidation",host="localhost", user="cprvalidation",password=d_pass,port=d_port)
+                db_config = parse_db_config()
+                host = db_config.get('db_host')
+                conn = psycopg2.connect(database="cprvalidation",host=host, user="cprvalidation",password=d_pass,port=d_port)
             except Exception as e:
                 print(e)
                 sys.exit()
@@ -549,7 +561,7 @@ def validateResource(resource):
                 sys.exit(1)
             try:
 		if(package["private"] == True): #If the dataset is already private, we do not need to send an email otherwise we spam
-		    return 
+		    return
                 package["private"] = True
                 get_action('package_update')({},package)
                 print("Made dataset with package id: " + package_id + " private as it contains CPR data. Either add an exception or remove it from the site")
@@ -580,7 +592,9 @@ def scanDB():
     d_pass = config.get('ckan.cprvalidation.cprvalidation_password', None)
 
     try:
-        conn = psycopg2.connect(database="cprvalidation", host="localhost", user="cprvalidation", password=d_pass,
+        db_config = parse_db_config()
+        host = db_config.get('db_host')
+        conn = psycopg2.connect(database="cprvalidation", host=host, user="cprvalidation", password=d_pass,
                                 port=d_port)
     except Exception as e:
         print(e)
@@ -612,7 +626,9 @@ def updateSchema(resources):
     d_pass = config.get('ckan.cprvalidation.cprvalidation_password', None)
 
     try:
-        conn = psycopg2.connect(database="cprvalidation",host="localhost", user="cprvalidation",password=d_pass,port=d_port)
+        db_config = parse_db_config()
+        host = db_config.get('db_host')
+        conn = psycopg2.connect(database="cprvalidation",host=host, user="cprvalidation",password=d_pass,port=d_port)
     except Exception as e:
         print(e)
         sys.exit()
