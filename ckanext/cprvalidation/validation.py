@@ -70,8 +70,9 @@ class Validation(CkanCommand):
         # Sometimes resources will contain valid CPR-numbers which are in fact not
         d_port = config.get('ckan.cprvalidation.postgres_port', None)
         d_pass = config.get('ckan.cprvalidation.cprvalidation_password', None)
+        db_name = config.get('ckan.cprvalidation.cprvalidation_db', None)
 
-        add_exception = ''' UPDATE cprvalidation.status SET excepted = TRUE
+        add_exception = ''' UPDATE {0}.status SET excepted = TRUE
                             WHERE package_id = %s
                             returning *
         ;'''
@@ -86,7 +87,7 @@ class Validation(CkanCommand):
         try:
             db_config = parse_db_config()
             host = db_config.get('db_host')
-            conn = psycopg2.connect(database="cprvalidation", host=host, user="cprvalidation", password=d_pass,
+            conn = psycopg2.connect(database=db_name, host=host, user="cprvalidation", password=d_pass,
                                     port=d_port)
             conn.autocommit = True
             print(" ")
@@ -95,7 +96,7 @@ class Validation(CkanCommand):
             sys.exit()
 
         cur = conn.cursor()
-        cur.execute(add_exception, (id,))
+        cur.execute(add_exception.format(db_name), (id,))
 
         count = len(cur.fetchall())
         if(count == 0):
@@ -110,6 +111,7 @@ class Validation(CkanCommand):
         #For debugging purposes we delete the database everytime we init. This CLEANS the database
         d_port = config.get('ckan.cprvalidation.postgres_port', None)
         d_pass = config.get('ckan.cprvalidation.cprvalidation_password', None)
+        db_name = config.get('ckan.cprvalidation.cprvalidation_db', None)
         postgres_pass = config.get('ckan.cprvalidation.postgres_password', None)
         error_state = False
         if d_pass == None:
@@ -129,9 +131,9 @@ class Validation(CkanCommand):
         create_user = '''
                     CREATE ROLE cprvalidation WITH PASSWORD %s;
                 '''
-        drop_db = '''DROP DATABASE IF EXISTS cprvalidation;'''
+        drop_db = '''DROP DATABASE IF EXISTS {0};'''
         create_db = '''
-            CREATE DATABASE cprvalidation
+            CREATE DATABASE {0}
             WITH OWNER = cprvalidation
             ENCODING = 'UTF8'
             TABLESPACE = pg_default
@@ -139,14 +141,14 @@ class Validation(CkanCommand):
         '''
 
         create_schema = '''
-            DROP SCHEMA IF EXISTS cprvalidation ;
-            CREATE SCHEMA cprvalidation
+            DROP SCHEMA IF EXISTS {0};
+            CREATE SCHEMA {0}
             AUTHORIZATION cprvalidation;
         '''
 
         create_table = '''
-            DROP TABLE IF EXISTS cprvalidation.status;
-            CREATE TABLE cprvalidation.status
+            DROP TABLE IF EXISTS {0}.status;
+            CREATE TABLE {0}.status
             (
               package_id character varying NOT NULL,
               resource_id character varying NOT NULL,
@@ -165,9 +167,9 @@ class Validation(CkanCommand):
             WITH (
               OIDS=FALSE
             );
-            ALTER TABLE cprvalidation.status
+            ALTER TABLE {0}.status
               OWNER TO cprvalidation;
-            COMMENT ON COLUMN cprvalidation.status.status IS 'valid, invalid, pending';
+            COMMENT ON COLUMN {0}.status.status IS 'valid, invalid, pending';
 
         '''
 
@@ -185,8 +187,8 @@ class Validation(CkanCommand):
         cur = conn.cursor()
         try:
             #cur.execute(create_user,[d_pass])
-            cur.execute(drop_db)
-            cur.execute(create_db)
+            cur.execute(drop_db.format(db_name))
+            cur.execute(create_db.format(db_name))
             print("Initialized Database")
             conn.commit()
             conn.close()
@@ -202,7 +204,7 @@ class Validation(CkanCommand):
         try:
             db_config = parse_db_config()
             host = db_config.get('db_host')
-            conn = psycopg2.connect(database="cprvalidation", host=host, user="cprvalidation",
+            conn = psycopg2.connect(database=db_name, host=host, user="cprvalidation",
                                         password=d_pass,
                                         port=d_port)
             conn.autocommit = True
@@ -215,8 +217,8 @@ class Validation(CkanCommand):
 
         cur = conn.cursor()
         try:
-            cur.execute(create_schema)
-            cur.execute(create_table)
+            cur.execute(create_schema.format(db_name))
+            cur.execute(create_table.format(db_name))
             print("Created schema and table")
             conn.commit()
             conn.close()
@@ -411,6 +413,7 @@ def validateResource(resource):
     email = config.get('ckan.cprvalidation.email', None)
     d_port = config.get('ckan.cprvalidation.postgres_port', None)
     d_pass = config.get('ckan.cprvalidation.cprvalidation_password', None)
+    db_name = config.get('ckan.cprvalidation.cprvalidation_db', None)
 
     id = resource[1]
     format = str(resource[3]).lower()
@@ -479,21 +482,21 @@ def validateResource(resource):
         try:
             db_config = parse_db_config()
             host = db_config.get('db_host')
-            conn = psycopg2.connect(database="cprvalidation", host=host, user="cprvalidation", password=d_pass,
+            conn = psycopg2.connect(database=db_name, host=host, user="cprvalidation", password=d_pass,
                                     port=d_port)
         except Exception as e:
             print(e)
             sys.exit()
         current_time = datetime.datetime.utcnow()  # Timestamp is UTC as CKAN stores metadata_modified as UTC
         insert = """
-                    UPDATE cprvalidation.status
+                    UPDATE {0}.status
                     SET status='error', last_checked = %s,error = %s
                     WHERE resource_id= %s
                     returning *
                 ;"""
 
         cur = conn.cursor()
-        cur.execute(insert, [current_time,error,id])
+        cur.execute(insert.format(db_name), [current_time,error,id])
         conn.commit()
         conn.close()
     else:
@@ -501,20 +504,20 @@ def validateResource(resource):
             try:
                 db_config = parse_db_config()
                 host = db_config.get('db_host')
-                conn = psycopg2.connect(database="cprvalidation",host=host, user="cprvalidation",password=d_pass,port=d_port)
+                conn = psycopg2.connect(database=db_name,host=host, user="cprvalidation",password=d_pass,port=d_port)
             except Exception as e:
                 print(e)
                 sys.exit()
             current_time = datetime.datetime.utcnow() #Timestamp
             insert = """
-                        UPDATE cprvalidation.status
+                        UPDATE {0}.status
                         SET status='valid', last_checked= %s
                         WHERE resource_id= %s
                         returning *
                     ;"""
 
             cur = conn.cursor()
-            cur.execute(insert, [current_time,id])
+            cur.execute(insert.format(db_name), [current_time,id])
             conn.commit()
             conn.close()
         else: #We have a CPR-number!
@@ -524,17 +527,17 @@ def validateResource(resource):
             try:
                 db_config = parse_db_config()
                 host = db_config.get('db_host')
-                conn = psycopg2.connect(database="cprvalidation",host=host, user="cprvalidation",password=d_pass,port=d_port)
+                conn = psycopg2.connect(database=db_name,host=host, user="cprvalidation",password=d_pass,port=d_port)
             except Exception as e:
                 print(e)
                 sys.exit()
             current_time = datetime.datetime.utcnow() #Timestamp
             select = """
-                        SELECT * FROM cprvalidation.status
+                        SELECT * FROM {0}.status
                         WHERE package_id = %s AND excepted IS NOT NULL;
                     """
             insert = """
-                        UPDATE cprvalidation.status
+                        UPDATE {0}.status
                         SET status='invalid', last_checked= %s,cpr_number=%s
                         WHERE resource_id= %s
                         returning *
@@ -542,12 +545,12 @@ def validateResource(resource):
 
 
             cur = conn.cursor()
-            cur.execute(select,[resource[0]])
+            cur.execute(select.format(db_name),[resource[0]])
             if(len(cur.fetchall()) > 0 ): #There was an exception made for this resource
                 print("Exception was made for package with id: %s ignoring." % resource[0])
                 return
 
-            cur.execute(insert, [current_time,iscpr[1],id])
+            cur.execute(insert.format(db_name), [current_time,iscpr[1],id])
             conn.commit()
             conn.close()
 
@@ -590,11 +593,12 @@ def validateResource(resource):
 def scanDB():
     d_port = config.get('ckan.cprvalidation.postgres_port', None)
     d_pass = config.get('ckan.cprvalidation.cprvalidation_password', None)
+    db_name = config.get('ckan.cprvalidation.cprvalidation_db', None)
 
     try:
         db_config = parse_db_config()
         host = db_config.get('db_host')
-        conn = psycopg2.connect(database="cprvalidation", host=host, user="cprvalidation", password=d_pass,
+        conn = psycopg2.connect(database=db_name, host=host, user="cprvalidation", password=d_pass,
                                 port=d_port)
     except Exception as e:
         print(e)
@@ -602,7 +606,7 @@ def scanDB():
 
     # TODO: PDF is really slow, so we need to fix that, removed for now
     select = """
-                   SELECT * FROM cprvalidation.status
+                   SELECT * FROM """ + db_name + """.status
                    WHERE format = ANY('{csv,xlsx,json,geojson,ods,docx}')
                    AND (last_updated::timestamp >= last_checked::timestamp OR last_checked IS NULL)
                    AND (url_type IS NOT NULL OR datastore_active = 'true')
@@ -624,11 +628,12 @@ def updateSchema(resources):
     #Connect to the database
     d_port = config.get('ckan.cprvalidation.postgres_port', None)
     d_pass = config.get('ckan.cprvalidation.cprvalidation_password', None)
+    db_name = config.get('ckan.cprvalidation.cprvalidation_db', None)
 
     try:
         db_config = parse_db_config()
         host = db_config.get('db_host')
-        conn = psycopg2.connect(database="cprvalidation",host=host, user="cprvalidation",password=d_pass,port=d_port)
+        conn = psycopg2.connect(database=db_name,host=host, user="cprvalidation",password=d_pass,port=d_port)
     except Exception as e:
         print(e)
         sys.exit()
@@ -636,21 +641,22 @@ def updateSchema(resources):
     # Fetch all resources from the database
     print("Looking for new resources..")
     cur = conn.cursor()
-    cur.execute("""SELECT resource_id, last_updated FROM cprvalidation.status;
-        """)
+    print db_name
+    cur.execute("""SELECT resource_id, last_updated FROM {0}.status;
+        """.format(db_name))
     database_resources = cur.fetchall()
     # These are new resources
     difference_insert = list(set([str(r['id']) for r in resources]) - set(r[0] for r in database_resources))
     difference_update = list(set([(str(r['metadata_modified']).replace("T"," ")) for r in resources]) - set(str(r[1]) for r in database_resources))
 
     insert = """
-                INSERT INTO cprvalidation.status values %s
+                INSERT INTO {0}.status values %s
                 ON CONFLICT (resource_id) DO
                   UPDATE SET last_updated = %s
                 returning *
             ;"""
     update = """
-                    UPDATE cprvalidation.status SET last_updated = %s
+                    UPDATE {0}.status SET last_updated = %s
                     WHERE resource_id = %s
                     returning *
                 ;"""
@@ -686,7 +692,7 @@ def updateSchema(resources):
              dict["metadata_modified"],
              )
         u = dict["metadata_modified"]
-        cur.execute(insert, (i,u))
+        cur.execute(insert.format(db_name), (i,u))
     print("Inserted %d new resources to the database \n" % count)
 
     # # #
@@ -700,7 +706,7 @@ def updateSchema(resources):
             count += 1
             i = dict["metadata_modified"]
             try:
-                cur.execute(update, (i, dict["id"]))
+                cur.execute(update.format(db_name), (i, dict["id"]))
             except Exception as e:
                 print(e.message)
     print("Updated %d new resources to the database \n" % count)
