@@ -22,6 +22,7 @@ from cStringIO import StringIO
 import ckan
 import subprocess
 import pylons
+import requests
 
 
 log = logging.getLogger(__name__)
@@ -253,7 +254,7 @@ class Validation(CkanCommand):
 # # # #
 # Helper Functions
 # # # #
-def processCSV(file_path, local):
+def processCSV(file_path, file_url, local):
     error = None
     file_string = None
     # We'll use the package_create function to create a new dataset.
@@ -272,7 +273,7 @@ def processCSV(file_path, local):
             file_string = f.read().replace(',', ' ')
     else:
         try:
-            request = urllib2.Request(file_path)
+            request = urllib2.Request(file_url)
 
             request.add_header("Authorization", api)
             response = urllib2.urlopen(request)
@@ -286,7 +287,7 @@ def processCSV(file_path, local):
                     for i in range(5):
                         try:
                             # We'll use the package_create function to create a new dataset.
-                            request = urllib2.Request(file_path)
+                            request = urllib2.Request(file_url)
 
                             request.add_header("Authorization", api)
                             response = urllib2.urlopen(request)
@@ -318,14 +319,14 @@ def processDOCX(file_path):
 
     return [error,file_string]
 
-def processXLSX(file_path):
+def processXLSX(file_url):
     error = None
     file_string = None
     #Uses Pandas to convert contents to string
     #Simple but it works
     #Parses all sheets by default
     try:
-        df = pandas.read_excel(file_path)
+        df = pandas.read_excel(file_url)
         file_string = df.to_string()
     except Exception as e:
         error = e.message
@@ -368,13 +369,13 @@ def processPDF(file_path):
 
     return [error,file_string]
 
-def processJSON(file_path):
+def processJSON(file_url):
     error = None
     file_string = None
     try:
-        with open(file_path) as data_file:
-            data = json.load(data_file)
-            file_string = str(data)
+        resp = requests.get(file_url)
+        data = resp.json()
+        file_string = str(data)
     except Exception as e:
         error = e.message
 
@@ -419,6 +420,7 @@ def validateResource(resource):
     format = str(resource[3]).lower()
     datastore = True if str(resource[6]).lower() == "true" else False
     filestore = True if resource[5] == "upload" else False
+    file_url = resource[4]
 
 
     file_string = None
@@ -451,18 +453,22 @@ def validateResource(resource):
 
     format = str(format).lower()
 
+    # If the s3filestore plugin is enabled, always retrieve files from HTTP
+    if ckan.plugins.plugin_loaded('s3filestore'):
+        local = False
+
     if format == "csv":
-        output = processCSV(file_path,local)
+        output = processCSV(file_path, file_url, local)
     elif format == "docx":
-        output = processDOCX(file_path)
+        output = processDOCX(file_url)
     elif format == "ods":
-        output = processODS(file_path)
+        output = processODS(file_url)
     elif format == "xlsx":
-        output = processXLSX(file_path)
+        output = processXLSX(file_url)
     elif format == "pdf":
-        output = processPDF(file_path)
+        output = processPDF(file_url)
     elif format == "geojson" or format == "json":
-        output = processJSON(file_path)
+        output = processJSON(file_url)
     else:
         print("Format %s can't be processed" % format)
         return
@@ -732,7 +738,8 @@ def getAllResources():
             dates.append(package["metadata_modified"])
             resources.append(resource)
 
-    print(sorted(dates,reverse=True)[0])
+    if dates:
+        print(sorted(dates,reverse=True)[0])
 
     return resources
 
