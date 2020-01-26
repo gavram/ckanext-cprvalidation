@@ -56,15 +56,15 @@ setup(
     # simple. Or you can use find_packages().
     packages=find_packages(exclude=['contrib', 'docs', 'tests*']),
 
-    setup_requires=['numpy'],
     # List run-time dependencies here.  These will be installed by pip when your
     # project is installed. For an analysis of "install_requires" vs pip's
     # requirements files see:
     # https://packaging.python.org/en/latest/technical.html#install-requires-vs-requirements-files
     install_requires=[
-	'pandas',
-	'pdfminer==20131113',
-	'xlrd',
+        'xlrd',
+        'pandas==0.20.3',
+        'python-docx',
+        'pdfminer==20131113'
     ],
 
     # If there are data files included in your packages that need to be
