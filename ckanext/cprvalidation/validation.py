@@ -10,7 +10,7 @@ import datetime
 import layout_scanner
 import json
 from ckan.logic import get_action
-from ckan.lib.cli import CkanCommand
+from ckan.lib.cli import CkanCommand, parse_db_config
 from ckan.common import config
 from time import sleep
 from pprint import pprint
@@ -22,6 +22,7 @@ from cStringIO import StringIO
 import ckan
 import subprocess
 import pylons
+import requests
 
 
 log = logging.getLogger(__name__)
@@ -34,6 +35,9 @@ class Validation(CkanCommand):
 
         validation scan
             Scans ckan for new resources and changes and validates them, run this periodically
+
+	validation addexception "package_id"
+	    Adds an exception in the database for false positives for alle resources on the given package
     '''
     summary = __doc__.split('\n')[0]
     usage = __doc__
@@ -67,8 +71,9 @@ class Validation(CkanCommand):
         # Sometimes resources will contain valid CPR-numbers which are in fact not
         d_port = config.get('ckan.cprvalidation.postgres_port', None)
         d_pass = config.get('ckan.cprvalidation.cprvalidation_password', None)
+        db_name = config.get('ckan.cprvalidation.cprvalidation_db', None)
 
-        add_exception = ''' UPDATE cprvalidation.status SET excepted = TRUE
+        add_exception = ''' UPDATE {0}.status SET excepted = TRUE
                             WHERE package_id = %s
                             returning *
         ;'''
@@ -81,7 +86,9 @@ class Validation(CkanCommand):
             sys.exit(1)
 
         try:
-            conn = psycopg2.connect(database="cprvalidation", host="localhost", user="cprvalidation", password=d_pass,
+            db_config = parse_db_config()
+            host = db_config.get('db_host')
+            conn = psycopg2.connect(database=db_name, host=host, user="cprvalidation", password=d_pass,
                                     port=d_port)
             conn.autocommit = True
             print(" ")
@@ -90,7 +97,7 @@ class Validation(CkanCommand):
             sys.exit()
 
         cur = conn.cursor()
-        cur.execute(add_exception, (id,))
+        cur.execute(add_exception.format(db_name), (id,))
 
         count = len(cur.fetchall())
         if(count == 0):
@@ -105,6 +112,7 @@ class Validation(CkanCommand):
         #For debugging purposes we delete the database everytime we init. This CLEANS the database
         d_port = config.get('ckan.cprvalidation.postgres_port', None)
         d_pass = config.get('ckan.cprvalidation.cprvalidation_password', None)
+        db_name = config.get('ckan.cprvalidation.cprvalidation_db', None)
         postgres_pass = config.get('ckan.cprvalidation.postgres_password', None)
         error_state = False
         if d_pass == None:
@@ -124,9 +132,9 @@ class Validation(CkanCommand):
         create_user = '''
                     CREATE ROLE cprvalidation WITH PASSWORD %s;
                 '''
-        drop_db = '''DROP DATABASE IF EXISTS cprvalidation;'''
+        drop_db = '''DROP DATABASE IF EXISTS {0};'''
         create_db = '''
-            CREATE DATABASE cprvalidation
+            CREATE DATABASE {0}
             WITH OWNER = cprvalidation
             ENCODING = 'UTF8'
             TABLESPACE = pg_default
@@ -134,14 +142,14 @@ class Validation(CkanCommand):
         '''
 
         create_schema = '''
-            DROP SCHEMA IF EXISTS cprvalidation ;
-            CREATE SCHEMA cprvalidation
+            DROP SCHEMA IF EXISTS {0};
+            CREATE SCHEMA {0}
             AUTHORIZATION cprvalidation;
         '''
 
         create_table = '''
-            DROP TABLE IF EXISTS cprvalidation.status;
-            CREATE TABLE cprvalidation.status
+            DROP TABLE IF EXISTS {0}.status;
+            CREATE TABLE {0}.status
             (
               package_id character varying NOT NULL,
               resource_id character varying NOT NULL,
@@ -160,14 +168,16 @@ class Validation(CkanCommand):
             WITH (
               OIDS=FALSE
             );
-            ALTER TABLE cprvalidation.status
+            ALTER TABLE {0}.status
               OWNER TO cprvalidation;
-            COMMENT ON COLUMN cprvalidation.status.status IS 'valid, invalid, pending';
+            COMMENT ON COLUMN {0}.status.status IS 'valid, invalid, pending';
 
         '''
 
         try:
-            conn = psycopg2.connect(database="postgres", host="localhost", user="postgres", password=postgres_pass,
+            db_config = parse_db_config()
+            host = db_config.get('db_host')
+            conn = psycopg2.connect(database="postgres", host=host, user="postgres", password=postgres_pass,
                                     port=d_port)
             conn.autocommit = True
             print("Connected as postgres user.")
@@ -178,8 +188,8 @@ class Validation(CkanCommand):
         cur = conn.cursor()
         try:
             #cur.execute(create_user,[d_pass])
-            cur.execute(drop_db)
-            cur.execute(create_db)
+            cur.execute(drop_db.format(db_name))
+            cur.execute(create_db.format(db_name))
             print("Initialized Database")
             conn.commit()
             conn.close()
@@ -193,7 +203,9 @@ class Validation(CkanCommand):
         # We need two different sessions to the database as we are changing user
         #
         try:
-            conn = psycopg2.connect(database="cprvalidation", host="localhost", user="cprvalidation",
+            db_config = parse_db_config()
+            host = db_config.get('db_host')
+            conn = psycopg2.connect(database=db_name, host=host, user="cprvalidation",
                                         password=d_pass,
                                         port=d_port)
             conn.autocommit = True
@@ -206,8 +218,8 @@ class Validation(CkanCommand):
 
         cur = conn.cursor()
         try:
-            cur.execute(create_schema)
-            cur.execute(create_table)
+            cur.execute(create_schema.format(db_name))
+            cur.execute(create_table.format(db_name))
             print("Created schema and table")
             conn.commit()
             conn.close()
@@ -242,7 +254,7 @@ class Validation(CkanCommand):
 # # # #
 # Helper Functions
 # # # #
-def processCSV(file_path, local):
+def processCSV(file_path, file_url, local):
     error = None
     file_string = None
     # We'll use the package_create function to create a new dataset.
@@ -261,7 +273,7 @@ def processCSV(file_path, local):
             file_string = f.read().replace(',', ' ')
     else:
         try:
-            request = urllib2.Request(file_path)
+            request = urllib2.Request(file_url)
 
             request.add_header("Authorization", api)
             response = urllib2.urlopen(request)
@@ -275,7 +287,7 @@ def processCSV(file_path, local):
                     for i in range(5):
                         try:
                             # We'll use the package_create function to create a new dataset.
-                            request = urllib2.Request(file_path)
+                            request = urllib2.Request(file_url)
 
                             request.add_header("Authorization", api)
                             response = urllib2.urlopen(request)
@@ -307,14 +319,14 @@ def processDOCX(file_path):
 
     return [error,file_string]
 
-def processXLSX(file_path):
+def processXLSX(file_url):
     error = None
     file_string = None
     #Uses Pandas to convert contents to string
     #Simple but it works
     #Parses all sheets by default
     try:
-        df = pandas.read_excel(file_path)
+        df = pandas.read_excel(file_url)
         file_string = df.to_string()
     except Exception as e:
         error = e.message
@@ -357,13 +369,13 @@ def processPDF(file_path):
 
     return [error,file_string]
 
-def processJSON(file_path):
+def processJSON(file_url):
     error = None
     file_string = None
     try:
-        with open(file_path) as data_file:
-            data = json.load(data_file)
-            file_string = str(data)
+        resp = requests.get(file_url)
+        data = resp.json()
+        file_string = str(data)
     except Exception as e:
         error = e.message
 
@@ -402,11 +414,13 @@ def validateResource(resource):
     email = config.get('ckan.cprvalidation.email', None)
     d_port = config.get('ckan.cprvalidation.postgres_port', None)
     d_pass = config.get('ckan.cprvalidation.cprvalidation_password', None)
+    db_name = config.get('ckan.cprvalidation.cprvalidation_db', None)
 
     id = resource[1]
     format = str(resource[3]).lower()
     datastore = True if str(resource[6]).lower() == "true" else False
     filestore = True if resource[5] == "upload" else False
+    file_url = resource[4]
 
 
     file_string = None
@@ -415,13 +429,15 @@ def validateResource(resource):
     error = False
 
     print("DEBUG INFO: ")
-    print("Datastore: " +str(datastore))
+    print("Resource: " + str(resource))
+    print("Datastore: " + str(datastore))
     print("Filestore: " + str(filestore))
 
+    storage_path = config.get('ckan.storage_path')
 
     # Get the filepath, locally or externally, it should not matter
     if filestore:
-        file_path = os.path.join("/var/lib/ckan/default/resources/",
+        file_path = os.path.join(storage_path, 'resources',
                                  id[0:3], id[3:6], id[6:])
         local = True
     elif datastore:
@@ -437,18 +453,22 @@ def validateResource(resource):
 
     format = str(format).lower()
 
+    # If the s3filestore plugin is enabled, always retrieve files from HTTP
+    if ckan.plugins.plugin_loaded('s3filestore'):
+        local = False
+
     if format == "csv":
-        output = processCSV(file_path,local)
+        output = processCSV(file_path, file_url, local)
     elif format == "docx":
-        output = processDOCX(file_path)
+        output = processDOCX(file_url)
     elif format == "ods":
-        output = processODS(file_path)
+        output = processODS(file_url)
     elif format == "xlsx":
-        output = processXLSX(file_path)
+        output = processXLSX(file_url)
     elif format == "pdf":
-        output = processPDF(file_path)
+        output = processPDF(file_url)
     elif format == "geojson" or format == "json":
-        output = processJSON(file_path)
+        output = processJSON(file_url)
     else:
         print("Format %s can't be processed" % format)
         return
@@ -466,40 +486,44 @@ def validateResource(resource):
     if(insert_error):
         print(error)
         try:
-            conn = psycopg2.connect(database="cprvalidation", host="localhost", user="cprvalidation", password=d_pass,
+            db_config = parse_db_config()
+            host = db_config.get('db_host')
+            conn = psycopg2.connect(database=db_name, host=host, user="cprvalidation", password=d_pass,
                                     port=d_port)
         except Exception as e:
             print(e)
             sys.exit()
         current_time = datetime.datetime.utcnow()  # Timestamp is UTC as CKAN stores metadata_modified as UTC
         insert = """
-                    UPDATE cprvalidation.status
+                    UPDATE {0}.status
                     SET status='error', last_checked = %s,error = %s
                     WHERE resource_id= %s
                     returning *
                 ;"""
 
         cur = conn.cursor()
-        cur.execute(insert, [current_time,error,id])
+        cur.execute(insert.format(db_name), [current_time,error,id])
         conn.commit()
         conn.close()
     else:
         if(not iscpr[0]): #If we dont have a CPR in the resource
             try:
-                conn = psycopg2.connect(database="cprvalidation",host="localhost", user="cprvalidation",password=d_pass,port=d_port)
+                db_config = parse_db_config()
+                host = db_config.get('db_host')
+                conn = psycopg2.connect(database=db_name,host=host, user="cprvalidation",password=d_pass,port=d_port)
             except Exception as e:
                 print(e)
                 sys.exit()
             current_time = datetime.datetime.utcnow() #Timestamp
             insert = """
-                        UPDATE cprvalidation.status
+                        UPDATE {0}.status
                         SET status='valid', last_checked= %s
                         WHERE resource_id= %s
                         returning *
                     ;"""
 
             cur = conn.cursor()
-            cur.execute(insert, [current_time,id])
+            cur.execute(insert.format(db_name), [current_time,id])
             conn.commit()
             conn.close()
         else: #We have a CPR-number!
@@ -507,17 +531,19 @@ def validateResource(resource):
             print("Detected a CPR number, if an exception is made nothing will happen")
 
             try:
-                conn = psycopg2.connect(database="cprvalidation",host="localhost", user="cprvalidation",password=d_pass,port=d_port)
+                db_config = parse_db_config()
+                host = db_config.get('db_host')
+                conn = psycopg2.connect(database=db_name,host=host, user="cprvalidation",password=d_pass,port=d_port)
             except Exception as e:
                 print(e)
                 sys.exit()
             current_time = datetime.datetime.utcnow() #Timestamp
             select = """
-                        SELECT * FROM cprvalidation.status
+                        SELECT * FROM {0}.status
                         WHERE package_id = %s AND excepted IS NOT NULL;
                     """
             insert = """
-                        UPDATE cprvalidation.status
+                        UPDATE {0}.status
                         SET status='invalid', last_checked= %s,cpr_number=%s
                         WHERE resource_id= %s
                         returning *
@@ -525,12 +551,12 @@ def validateResource(resource):
 
 
             cur = conn.cursor()
-            cur.execute(select,[resource[0]])
+            cur.execute(select.format(db_name),[resource[0]])
             if(len(cur.fetchall()) > 0 ): #There was an exception made for this resource
                 print("Exception was made for package with id: %s ignoring." % resource[0])
                 return
 
-            cur.execute(insert, [current_time,iscpr[1],id])
+            cur.execute(insert.format(db_name), [current_time,iscpr[1],id])
             conn.commit()
             conn.close()
 
@@ -543,12 +569,13 @@ def validateResource(resource):
                 print(e.message)
                 sys.exit(1)
             try:
+		if(package["private"] == True): #If the dataset is already private, we do not need to send an email otherwise we spam
+		    return
                 package["private"] = True
                 get_action('package_update')({},package)
                 print("Made dataset with package id: " + package_id + " private as it contains CPR data. Either add an exception or remove it from the site")
                 print("When an exception has been made or data altered, kindly mark data as public again")
 
-                #TODO: Add some mail report thing here
                 recipient = config.get('ckan.cprvalidation.email', None)
                 subject = "CPR fundet i datasæt: %s" % resource[0]
                 body = "CPR data er fundet i datasættet med id: %s specifikt resourcen med id: %s \n Data er gjort privat, tjek data igennem og " \
@@ -572,9 +599,12 @@ def validateResource(resource):
 def scanDB():
     d_port = config.get('ckan.cprvalidation.postgres_port', None)
     d_pass = config.get('ckan.cprvalidation.cprvalidation_password', None)
+    db_name = config.get('ckan.cprvalidation.cprvalidation_db', None)
 
     try:
-        conn = psycopg2.connect(database="cprvalidation", host="localhost", user="cprvalidation", password=d_pass,
+        db_config = parse_db_config()
+        host = db_config.get('db_host')
+        conn = psycopg2.connect(database=db_name, host=host, user="cprvalidation", password=d_pass,
                                 port=d_port)
     except Exception as e:
         print(e)
@@ -582,7 +612,7 @@ def scanDB():
 
     # TODO: PDF is really slow, so we need to fix that, removed for now
     select = """
-                   SELECT * FROM cprvalidation.status
+                   SELECT * FROM """ + db_name + """.status
                    WHERE format = ANY('{csv,xlsx,json,geojson,ods,docx}')
                    AND (last_updated::timestamp >= last_checked::timestamp OR last_checked IS NULL)
                    AND (url_type IS NOT NULL OR datastore_active = 'true')
@@ -604,9 +634,12 @@ def updateSchema(resources):
     #Connect to the database
     d_port = config.get('ckan.cprvalidation.postgres_port', None)
     d_pass = config.get('ckan.cprvalidation.cprvalidation_password', None)
+    db_name = config.get('ckan.cprvalidation.cprvalidation_db', None)
 
     try:
-        conn = psycopg2.connect(database="cprvalidation",host="localhost", user="cprvalidation",password=d_pass,port=d_port)
+        db_config = parse_db_config()
+        host = db_config.get('db_host')
+        conn = psycopg2.connect(database=db_name,host=host, user="cprvalidation",password=d_pass,port=d_port)
     except Exception as e:
         print(e)
         sys.exit()
@@ -614,21 +647,22 @@ def updateSchema(resources):
     # Fetch all resources from the database
     print("Looking for new resources..")
     cur = conn.cursor()
-    cur.execute("""SELECT resource_id, last_updated FROM cprvalidation.status;
-        """)
+    print db_name
+    cur.execute("""SELECT resource_id, last_updated FROM {0}.status;
+        """.format(db_name))
     database_resources = cur.fetchall()
     # These are new resources
     difference_insert = list(set([str(r['id']) for r in resources]) - set(r[0] for r in database_resources))
     difference_update = list(set([(str(r['metadata_modified']).replace("T"," ")) for r in resources]) - set(str(r[1]) for r in database_resources))
 
     insert = """
-                INSERT INTO cprvalidation.status values %s
+                INSERT INTO {0}.status values %s
                 ON CONFLICT (resource_id) DO
                   UPDATE SET last_updated = %s
                 returning *
             ;"""
     update = """
-                    UPDATE cprvalidation.status SET last_updated = %s
+                    UPDATE {0}.status SET last_updated = %s
                     WHERE resource_id = %s
                     returning *
                 ;"""
@@ -664,7 +698,7 @@ def updateSchema(resources):
              dict["metadata_modified"],
              )
         u = dict["metadata_modified"]
-        cur.execute(insert, (i,u))
+        cur.execute(insert.format(db_name), (i,u))
     print("Inserted %d new resources to the database \n" % count)
 
     # # #
@@ -678,7 +712,7 @@ def updateSchema(resources):
             count += 1
             i = dict["metadata_modified"]
             try:
-                cur.execute(update, (i, dict["id"]))
+                cur.execute(update.format(db_name), (i, dict["id"]))
             except Exception as e:
                 print(e.message)
     print("Updated %d new resources to the database \n" % count)
@@ -704,7 +738,8 @@ def getAllResources():
             dates.append(package["metadata_modified"])
             resources.append(resource)
 
-    print(sorted(dates,reverse=True)[0])
+    if dates:
+        print(sorted(dates,reverse=True)[0])
 
     return resources
 
